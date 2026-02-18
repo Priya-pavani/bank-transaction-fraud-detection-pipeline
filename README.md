@@ -190,11 +190,16 @@ python -m streamlit run dashboard/app.py
 
 ```mermaid
 erDiagram
-    bronze_transactions ||--o{ silver_transactions : "cleaned_into"
+    batch_audit_log ||--o{ bronze_transactions : "tracks"
+    batch_audit_log ||--o{ silver_transactions : "tracks"
+    batch_audit_log ||--o{ rejected_transactions : "tracks"
+    batch_audit_log ||--o{ fraud_alerts : "tracks"
+
+    bronze_transactions ||--o| silver_transactions : "cleaned_into"
+    bronze_transactions ||--o| rejected_transactions : "rejects_to"
+
     silver_transactions ||--o{ gold_transactions_scd2 : "merged_into"
     gold_transactions_scd2 ||--o{ fraud_alerts : "generates"
-    bronze_transactions ||--o{ rejected_transactions : "rejects_to"
-    batch_audit_log ||--o{ bronze_transactions : "tracks"
 
     bronze_transactions {
         string txn_id
@@ -247,6 +252,7 @@ erDiagram
         int fraud_flagged
         string status
     }
+
 ```
 
 ---
