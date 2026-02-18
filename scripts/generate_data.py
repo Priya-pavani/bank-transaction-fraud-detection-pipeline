@@ -56,34 +56,58 @@ def generate_transactions(n=20000, day_offset=0):
     df.loc[fraud_idx, "amount"] = np.random.randint(150000, 300000, size=len(fraud_idx))
 
     # B) Rapid burst fraud (same account multiple txns in 10 mins)
-    burst_accounts = np.random.choice(df["account_id"].unique(), size=10, replace=False)
+    burst_accounts = np.random.choice(df["account_id"].dropna().unique(), size=10, replace=False)
 
     for acc in burst_accounts:
-        burst_rows = df[df["account_id"] == acc].sample(8, replace=False).index
+        acc_df = df[df["account_id"] == acc]
+        sample_size = min(8, len(acc_df))
+
+        if sample_size < 2:
+            continue
+
+        burst_rows = acc_df.sample(sample_size, replace=False).index
         base_time = datetime.now() - timedelta(minutes=np.random.randint(0, 120))
 
         df.loc[burst_rows, "txn_timestamp"] = [
             (base_time + timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M:%S")
-            for i in range(len(burst_rows))
+            for i in range(sample_size)
         ]
-        df.loc[burst_rows, "amount"] = np.random.randint(3000, 15000, size=len(burst_rows))
+        df.loc[burst_rows, "amount"] = np.random.randint(3000, 15000, size=sample_size)
         df.loc[burst_rows, "channel"] = "UPI"
 
-    # C) Multiple locations fraud (same account different cities)
-    loc_accounts = np.random.choice(df["account_id"].unique(), size=12, replace=False)
+    # C) Multiple locations fraud (same account different cities in short time)
+    loc_accounts = np.random.choice(df["account_id"].dropna().unique(), size=12, replace=False)
     cities = ["Mumbai", "Delhi", "Bangalore", "Chennai", "Hyderabad", "Pune", "Kolkata"]
 
     for acc in loc_accounts:
-        idxs = df[df["account_id"] == acc].sample(5, replace=False).index
-        df.loc[idxs, "location"] = np.random.choice(cities, size=len(idxs), replace=False)
+        acc_df = df[df["account_id"] == acc]
+        sample_size = min(5, len(acc_df))
+
+        if sample_size < 2:
+            continue
+
+        idxs = acc_df.sample(sample_size, replace=False).index
+        df.loc[idxs, "location"] = np.random.choice(cities, size=sample_size, replace=False)
 
     # D) Failed attempts then success fraud
-    fail_accounts = np.random.choice(df["account_id"].unique(), size=12, replace=False)
+    fail_accounts = np.random.choice(df["account_id"].dropna().unique(), size=12, replace=False)
 
     for acc in fail_accounts:
-        idxs = df[df["account_id"] == acc].sample(5, replace=False).index
-        df.loc[idxs[:4], "status"] = "FAILED"
-        df.loc[idxs[4:], "status"] = "SUCCESS"
+        acc_df = df[df["account_id"] == acc]
+        sample_size = min(5, len(acc_df))
+
+        if sample_size < 2:
+            continue
+
+        idxs = acc_df.sample(sample_size, replace=False).index.tolist()
+
+        if len(idxs) >= 4:
+            df.loc[idxs[:4], "status"] = "FAILED"
+            df.loc[idxs[4:], "status"] = "SUCCESS"
+        else:
+            df.loc[idxs[:-1], "status"] = "FAILED"
+            df.loc[idxs[-1:], "status"] = "SUCCESS"
+
         df.loc[idxs, "amount"] = np.random.randint(1000, 8000, size=len(idxs))
         df.loc[idxs, "channel"] = "CARD"
 
@@ -91,6 +115,12 @@ def generate_transactions(n=20000, day_offset=0):
     shared_device = f"D{np.random.randint(10000, 99999)}"
     device_fraud_rows = np.random.choice(df.index, size=20, replace=False)
     df.loc[device_fraud_rows, "device_id"] = shared_device
+
+    # F) Merchant fraud: many txns to same merchant
+    merchant_fraud_merchant = f"M{np.random.randint(100, 999)}"
+    merchant_fraud_rows = np.random.choice(df.index, size=30, replace=False)
+    df.loc[merchant_fraud_rows, "merchant_id"] = merchant_fraud_merchant
+    df.loc[merchant_fraud_rows, "amount"] = np.random.randint(50000, 120000, size=30)
 
     # =====================================================
     # Inject BAD DATA (for data quality dashboard variety)
@@ -128,7 +158,7 @@ def generate_transactions(n=20000, day_offset=0):
     bad_idx8 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
     df.loc[bad_idx8, "currency"] = "USD"
 
-    # 9) Duplicate txn_id (simulate duplicate file records)
+    # 9) Duplicate txn_id
     dup_idx = np.random.choice(df.index, size=int(n * 0.002), replace=False)
     df.loc[dup_idx, "txn_id"] = df.loc[dup_idx, "txn_id"].iloc[0]
 
@@ -136,14 +166,20 @@ def generate_transactions(n=20000, day_offset=0):
     bad_idx9 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
     df.loc[bad_idx9, "merchant_id"] = None
 
-    return df
+    # 11) Invalid txn_type
+    bad_idx10 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
+    df.loc[bad_idx10, "txn_type"] = "INVALID_TYPE"
 
+    # 12) Invalid timestamp format
+    bad_idx11 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
+    df.loc[bad_idx11, "txn_timestamp"] = "NOT_A_DATE"
+
+    return df
 
 
 def create_corrected_file(original_df: pd.DataFrame, corrections=300):
     df_corr = original_df.copy()
 
-    # Pick random transactions and change amount/status
     idx = np.random.choice(df_corr.index, size=corrections, replace=False)
 
     df_corr.loc[idx, "amount"] = df_corr.loc[idx, "amount"] * np.random.uniform(1.5, 3.0, size=corrections)
