@@ -27,7 +27,10 @@ def generate_transactions(n=20000, day_offset=0):
     currency = ["INR"] * n
 
     merchant_ids = [f"M{np.random.randint(100, 999)}" for _ in range(n)]
-    location = np.random.choice(["Mumbai", "Delhi", "Bangalore", "Chennai", "Hyderabad"], size=n)
+    location = np.random.choice(
+        ["Mumbai", "Delhi", "Bangalore", "Chennai", "Hyderabad", "Pune", "Kolkata"],
+        size=n
+    )
     device_id = [f"D{np.random.randint(10000, 99999)}" for _ in range(n)]
 
     df = pd.DataFrame({
@@ -44,15 +47,97 @@ def generate_transactions(n=20000, day_offset=0):
         "device_id": device_id
     })
 
-    # Inject some fraud patterns
-    fraud_idx = np.random.choice(df.index, size=int(n * 0.01), replace=False)
+    # =====================================================
+    # Inject FRAUD PATTERNS (for fraud dashboard variety)
+    # =====================================================
+
+    # A) High amount fraud
+    fraud_idx = np.random.choice(df.index, size=int(n * 0.005), replace=False)
     df.loc[fraud_idx, "amount"] = np.random.randint(150000, 300000, size=len(fraud_idx))
 
-    # Inject some invalid rows (bad data)
-    bad_idx = np.random.choice(df.index, size=int(n * 0.005), replace=False)
-    df.loc[bad_idx, "txn_id"] = None
+    # B) Rapid burst fraud (same account multiple txns in 10 mins)
+    burst_accounts = np.random.choice(df["account_id"].unique(), size=10, replace=False)
+
+    for acc in burst_accounts:
+        burst_rows = df[df["account_id"] == acc].sample(8, replace=False).index
+        base_time = datetime.now() - timedelta(minutes=np.random.randint(0, 120))
+
+        df.loc[burst_rows, "txn_timestamp"] = [
+            (base_time + timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M:%S")
+            for i in range(len(burst_rows))
+        ]
+        df.loc[burst_rows, "amount"] = np.random.randint(3000, 15000, size=len(burst_rows))
+        df.loc[burst_rows, "channel"] = "UPI"
+
+    # C) Multiple locations fraud (same account different cities)
+    loc_accounts = np.random.choice(df["account_id"].unique(), size=12, replace=False)
+    cities = ["Mumbai", "Delhi", "Bangalore", "Chennai", "Hyderabad", "Pune", "Kolkata"]
+
+    for acc in loc_accounts:
+        idxs = df[df["account_id"] == acc].sample(5, replace=False).index
+        df.loc[idxs, "location"] = np.random.choice(cities, size=len(idxs), replace=False)
+
+    # D) Failed attempts then success fraud
+    fail_accounts = np.random.choice(df["account_id"].unique(), size=12, replace=False)
+
+    for acc in fail_accounts:
+        idxs = df[df["account_id"] == acc].sample(5, replace=False).index
+        df.loc[idxs[:4], "status"] = "FAILED"
+        df.loc[idxs[4:], "status"] = "SUCCESS"
+        df.loc[idxs, "amount"] = np.random.randint(1000, 8000, size=len(idxs))
+        df.loc[idxs, "channel"] = "CARD"
+
+    # E) Same device used across multiple accounts (device fraud)
+    shared_device = f"D{np.random.randint(10000, 99999)}"
+    device_fraud_rows = np.random.choice(df.index, size=20, replace=False)
+    df.loc[device_fraud_rows, "device_id"] = shared_device
+
+    # =====================================================
+    # Inject BAD DATA (for data quality dashboard variety)
+    # =====================================================
+
+    # 1) Missing txn_id
+    bad_idx1 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
+    df.loc[bad_idx1, "txn_id"] = None
+
+    # 2) Missing account_id
+    bad_idx2 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
+    df.loc[bad_idx2, "account_id"] = None
+
+    # 3) Missing timestamp
+    bad_idx3 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
+    df.loc[bad_idx3, "txn_timestamp"] = None
+
+    # 4) Negative amount
+    bad_idx4 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
+    df.loc[bad_idx4, "amount"] = -1 * np.random.randint(10, 5000, size=len(bad_idx4))
+
+    # 5) Zero amount
+    bad_idx5 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
+    df.loc[bad_idx5, "amount"] = 0
+
+    # 6) Invalid channel
+    bad_idx6 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
+    df.loc[bad_idx6, "channel"] = "INVALID_CHANNEL"
+
+    # 7) Invalid status
+    bad_idx7 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
+    df.loc[bad_idx7, "status"] = "UNKNOWN"
+
+    # 8) Wrong currency
+    bad_idx8 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
+    df.loc[bad_idx8, "currency"] = "USD"
+
+    # 9) Duplicate txn_id (simulate duplicate file records)
+    dup_idx = np.random.choice(df.index, size=int(n * 0.002), replace=False)
+    df.loc[dup_idx, "txn_id"] = df.loc[dup_idx, "txn_id"].iloc[0]
+
+    # 10) Missing merchant_id
+    bad_idx9 = np.random.choice(df.index, size=int(n * 0.002), replace=False)
+    df.loc[bad_idx9, "merchant_id"] = None
 
     return df
+
 
 
 def create_corrected_file(original_df: pd.DataFrame, corrections=300):
